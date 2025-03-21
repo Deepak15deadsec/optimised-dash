@@ -1,11 +1,13 @@
-
 import React from 'react';
 import StatsCard from '@/components/dashboard/StatsCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Users, CreditCard, DollarSign, Activity, TrendingUp, TrendingDown } from 'lucide-react';
 import { ResponsiveContainer, AreaChart as RechartsAreaChart, Area, BarChart as RechartsBarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { appConfig } from '@/config/app-config';
 
 const Dashboard = () => {
+  const dashboardConfig = appConfig.dashboard;
+  
   // Sample data for charts
   const areaChartData = [
     { name: 'Jan', value: 400 },
@@ -28,8 +30,8 @@ const Dashboard = () => {
   return (
     <div className="space-y-6 py-6 animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold mb-1">Dashboard</h1>
-        <p className="text-muted-foreground">Welcome back to your dashboard overview.</p>
+        <h1 className="text-3xl font-bold mb-1">{dashboardConfig.title}</h1>
+        <p className="text-muted-foreground">{dashboardConfig.welcomeMessage}</p>
       </div>
       
       {/* Stats cards */}

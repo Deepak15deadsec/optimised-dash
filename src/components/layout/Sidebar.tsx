@@ -1,8 +1,8 @@
-
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
+import { appConfig } from '@/config/app-config';
 import {
   LayoutDashboard,
   Users,
@@ -15,6 +15,19 @@ import {
   LogOut,
 } from 'lucide-react';
 
+// Map of icon names to components
+const iconMap: Record<string, React.ReactNode> = {
+  LayoutDashboard: <LayoutDashboard className="h-5 w-5" />,
+  Users: <Users className="h-5 w-5" />,
+  Settings: <Settings className="h-5 w-5" />,
+  BarChart3: <BarChart3 className="h-5 w-5" />,
+  FileText: <FileText className="h-5 w-5" />,
+  Home: <Home className="h-5 w-5" />,
+  Package: <Package className="h-5 w-5" />,
+  LogOut: <LogOut className="h-5 w-5" />,
+  Layers: <Layers className="h-5 w-5" />
+};
+
 interface SidebarProps {
   isOpen: boolean;
   setIsOpen: (open: boolean) => void;
@@ -24,21 +37,13 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
   const location = useLocation();
   const { state, logout } = useAuth();
   const { user } = state;
-
-  const userNavItems = [
-    { name: 'Dashboard', icon: <LayoutDashboard className="h-5 w-5" />, href: '/dashboard' },
-    { name: 'Reports', icon: <BarChart3 className="h-5 w-5" />, href: '/reports' },
-    { name: 'Documents', icon: <FileText className="h-5 w-5" />, href: '/documents' },
-  ];
-
-  const adminNavItems = [
-    ...userNavItems,
-    { name: 'Users', icon: <Users className="h-5 w-5" />, href: '/users' },
-    { name: 'Settings', icon: <Settings className="h-5 w-5" />, href: '/settings' },
-  ];
-
-  const navItems = user?.role === 'admin' ? adminNavItems : userNavItems;
-
+  const config = appConfig.sidebar;
+  
+  // Get accessible sections based on user role
+  const accessibleSections = user?.role ? 
+    config.roles[user.role] || [] : 
+    config.roles['user'] || []; // Default to user role if no role specified
+    
   return (
     <aside
       className={cn(
@@ -53,53 +58,49 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       <div className="flex flex-col h-full">
         <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-4">
           <Layers className="h-6 w-6 text-sidebar-primary" />
-          <span className="text-xl font-semibold">DashboardX</span>
+          <span className="text-xl font-semibold">{config.appName}</span>
         </div>
         
         <div className="flex-1 overflow-y-auto py-4 px-3">
-          <div className="space-y-1">
-            <p className="text-xs font-semibold text-sidebar-foreground/60 uppercase tracking-wider px-3 py-2">
-              Menu
-            </p>
+          {/* Render each accessible section */}
+          {accessibleSections.map(sectionKey => {
+            const section = config.sections[sectionKey];
+            if (!section) return null;
             
-            {/* Main nav items */}
-            {navItems.map((item) => {
-              const isActive = location.pathname === item.href;
-              
-              return (
-                <Link
-                  key={item.name}
-                  to={item.href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                    {
-                      "bg-sidebar-accent text-sidebar-accent-foreground": isActive,
-                      "hover:bg-sidebar-accent/50 text-sidebar-foreground": !isActive,
-                    }
-                  )}
-                >
-                  {item.icon}
-                  <span>{item.name}</span>
-                </Link>
-              );
-            })}
-            
-            {/* Divider */}
-            <div className="my-4 h-px bg-sidebar-border"></div>
-            
-            {/* Support and logout */}
-            <p className="text-xs font-semibold text-sidebar-foreground/60 uppercase tracking-wider px-3 py-2">
-              Support
-            </p>
-            
-            <Link
-              to="/help"
-              className="flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent/50"
-            >
-              <Package className="h-5 w-5" />
-              <span>Help Center</span>
-            </Link>
-            
+            return (
+              <div key={sectionKey} className="space-y-1 mb-6">
+                <p className="text-xs font-semibold text-sidebar-foreground/60 uppercase tracking-wider px-3 py-2">
+                  {section.title}
+                </p>
+                
+                {/* Section items */}
+                {section.items.map((item) => {
+                  const isActive = location.pathname === item.href;
+                  const icon = iconMap[item.icon] || <Home className="h-5 w-5" />;
+                  
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.href}
+                      className={cn(
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                        {
+                          "bg-sidebar-accent text-sidebar-accent-foreground": isActive,
+                          "hover:bg-sidebar-accent/50 text-sidebar-foreground": !isActive,
+                        }
+                      )}
+                    >
+                      {icon}
+                      <span>{item.name}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            );
+          })}
+          
+          {/* Logout button is always visible */}
+          <div className="mt-4">
             <button
               onClick={() => logout()}
               className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors hover:bg-sidebar-accent/50 text-sidebar-foreground"

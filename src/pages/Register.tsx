@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/hooks/useStore';
@@ -8,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Eye, EyeOff, Lock, Mail, User } from 'lucide-react';
 import ThemeToggle from '@/components/ui/ThemeToggle';
+import { appConfig } from '@/config/app-config';
 
 const Register = () => {
   const { register, error, isAuthenticated, clearError } = useAuth();
@@ -18,6 +18,7 @@ const Register = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errors, setErrors] = useState({ name: '', email: '', password: '' });
+  const authConfig = appConfig.auth.register;
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -80,8 +81,8 @@ const Register = () => {
       
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold">DashboardX</h1>
-          <p className="text-muted-foreground mt-2">Create your account to get started</p>
+          <h1 className="text-2xl font-bold">{authConfig.title}</h1>
+          <p className="text-muted-foreground mt-2">{authConfig.subtitle}</p>
         </div>
         
         <Card className="border-border bg-card/50 backdrop-blur-sm animate-fade-in">
