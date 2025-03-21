@@ -1,28 +1,31 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { get, post, put, del } from '@/lib/axios';
 import { ApiResponse, PaginatedResponse } from '@/lib/types';
 import { toast } from 'sonner';
 
 // Generic data fetching hook with pagination, sorting, and filtering
 export function useDataFetching<T>(endpoint: string) {
-  const [data, setData] = useState<T[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [pagination, setPagination] = useState({
     page: 1,
-    limit: 10,
-    total: 0,
-    totalPages: 0
+    limit: 10
   });
   const [sortBy, setSortBy] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [filters, setFilters] = useState<Record<string, any>>({});
-
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
+  
+  // Build query key with all parameters
+  const queryKey = [endpoint, pagination.page, pagination.limit, sortBy, sortDirection, filters];
+  
+  // Use react-query for data fetching
+  const {
+    data: response,
+    isLoading: loading,
+    error,
+    refetch
+  } = useQuery({
+    queryKey,
+    queryFn: async () => {
       // Build query parameters
       const queryParams = new URLSearchParams();
       queryParams.append('page', pagination.page.toString());
@@ -41,33 +44,16 @@ export function useDataFetching<T>(endpoint: string) {
       });
       
       // Make API call
-      const response = await get<PaginatedResponse<T>>(`${endpoint}?${queryParams.toString()}`);
-      
-      setData(response.data);
-      setPagination({
-        page: response.page,
-        limit: response.limit,
-        total: response.total,
-        totalPages: response.totalPages
-      });
-    } catch (err: any) {
-      setError(err.message || 'An error occurred while fetching data');
-      toast.error('Failed to load data');
-    } finally {
-      setLoading(false);
+      return await get<PaginatedResponse<T>>(`${endpoint}?${queryParams.toString()}`);
     }
-  }, [endpoint, pagination.page, pagination.limit, sortBy, sortDirection, filters]);
-
+  });
+  
   // Reset pagination when filters change
-  useEffect(() => {
+  const handleFilterChange = (newFilters: Record<string, any>) => {
     setPagination(prev => ({ ...prev, page: 1 }));
-  }, [filters]);
-
-  // Initial data fetch
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
+    setFilters(prev => ({ ...prev, ...newFilters }));
+  };
+  
   const handlePageChange = (page: number) => {
     setPagination(prev => ({ ...prev, page }));
   };
@@ -85,23 +71,24 @@ export function useDataFetching<T>(endpoint: string) {
     }
   };
 
-  const handleFilterChange = (newFilters: Record<string, any>) => {
-    setFilters(prev => ({ ...prev, ...newFilters }));
-  };
-
   const handleFilterReset = () => {
     setFilters({});
+    setPagination(prev => ({ ...prev, page: 1 }));
   };
 
   return {
-    data,
+    data: response?.data || [],
+    pagination: {
+      ...pagination,
+      total: response?.total || 0,
+      totalPages: response?.totalPages || 0
+    },
     loading,
-    error,
-    pagination,
+    error: error ? (error as Error).message : null,
     sortBy,
     sortDirection,
     filters,
-    refetch: fetchData,
+    refetch,
     handlePageChange,
     handleLimitChange,
     handleSort,
@@ -112,131 +99,119 @@ export function useDataFetching<T>(endpoint: string) {
 
 // CRUD operations hook
 export function useCrud<T, CreateDto = Partial<T>, UpdateDto = Partial<T>>(endpoint: string) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const queryKey = [endpoint];
   
-  // Fetch data listing is handled by useDataFetching
+  // Fetch single item by ID
+  const useGetById = (id: string | number) => {
+    return useQuery({
+      queryKey: [...queryKey, id],
+      queryFn: async () => {
+        const response = await get<ApiResponse<T>>(`${endpoint}/${id}`);
+        return response.data;
+      },
+      enabled: !!id
+    });
+  };
   
-  const getById = useCallback(async (id: string | number) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await get<ApiResponse<T>>(`${endpoint}/${id}`);
-      return response.data;
-    } catch (err: any) {
-      setError(err.message || 'An error occurred');
-      toast.error('Failed to fetch item');
-      throw err;
-    } finally {
-      setLoading(false);
-    }
-  }, [endpoint]);
-  
-  const create = useCallback(async (data: CreateDto) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await post<ApiResponse<T>>(endpoint, data);
+  // Create mutation
+  const createMutation = useMutation({
+    mutationFn: async (data: CreateDto) => {
+      return await post<ApiResponse<T>>(endpoint, data);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey });
       toast.success('Item created successfully');
-      return response.data;
-    } catch (err: any) {
-      setError(err.message || 'An error occurred');
-      toast.error('Failed to create item');
-      throw err;
-    } finally {
-      setLoading(false);
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to create item');
     }
-  }, [endpoint]);
+  });
   
-  const update = useCallback(async (id: string | number, data: UpdateDto) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const response = await put<ApiResponse<T>>(`${endpoint}/${id}`, data);
+  // Update mutation
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string | number; data: UpdateDto }) => {
+      return await put<ApiResponse<T>>(`${endpoint}/${id}`, data);
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey });
       toast.success('Item updated successfully');
-      return response.data;
-    } catch (err: any) {
-      setError(err.message || 'An error occurred');
-      toast.error('Failed to update item');
-      throw err;
-    } finally {
-      setLoading(false);
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to update item');
     }
-  }, [endpoint]);
+  });
   
-  const remove = useCallback(async (id: string | number) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      await del<ApiResponse<void>>(`${endpoint}/${id}`);
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string | number) => {
+      return await del<ApiResponse<void>>(`${endpoint}/${id}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
       toast.success('Item deleted successfully');
-      return true;
-    } catch (err: any) {
-      setError(err.message || 'An error occurred');
-      toast.error('Failed to delete item');
-      throw err;
-    } finally {
-      setLoading(false);
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to delete item');
     }
-  }, [endpoint]);
+  });
   
   return {
-    loading,
-    error,
-    getById,
-    create,
-    update,
-    remove
+    useGetById,
+    create: {
+      mutate: createMutation.mutate,
+      isLoading: createMutation.isPending,
+      error: createMutation.error
+    },
+    update: {
+      mutate: updateMutation.mutate,
+      isLoading: updateMutation.isPending,
+      error: updateMutation.error
+    },
+    remove: {
+      mutate: deleteMutation.mutate,
+      isLoading: deleteMutation.isPending,
+      error: deleteMutation.error
+    }
   };
 }
 
-// Export an analytics data hook for dashboards
+// Analytics data hook for dashboards
 export function useAnalytics(endpoint: string = '/analytics') {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
     start: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0],
     end: new Date().toISOString().split('T')[0]
   });
-
-  const fetchAnalytics = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
+  
+  const queryKey = [endpoint, dateRange.start, dateRange.end];
+  
+  const {
+    data: response,
+    isLoading: loading,
+    error,
+    refetch
+  } = useQuery({
+    queryKey,
+    queryFn: async () => {
       const queryParams = new URLSearchParams();
       queryParams.append('startDate', dateRange.start);
       queryParams.append('endDate', dateRange.end);
       
       const response = await get<ApiResponse<any>>(`${endpoint}?${queryParams.toString()}`);
-      setData(response.data);
-    } catch (err: any) {
-      setError(err.message || 'An error occurred while fetching analytics');
-      toast.error('Failed to load analytics data');
-    } finally {
-      setLoading(false);
+      return response;
     }
-  }, [endpoint, dateRange]);
-
-  useEffect(() => {
-    fetchAnalytics();
-  }, [fetchAnalytics]);
+  });
 
   const handleDateRangeChange = (newRange: { start: string; end: string }) => {
     setDateRange(newRange);
   };
 
   return {
-    data,
+    data: response?.data || null,
     loading,
-    error,
+    error: error ? (error as Error).message : null,
     dateRange,
     handleDateRangeChange,
-    refetch: fetchAnalytics
+    refetch
   };
 } 
