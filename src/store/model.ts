@@ -1,4 +1,3 @@
-
 import { Action, Computed, Thunk, action, computed, thunk } from 'easy-peasy';
 import { User, LoginCredentials, RegisterCredentials, ApiResponse } from '@/lib/types';
 import { post } from '@/lib/axios';
@@ -92,17 +91,24 @@ export const authModel: AuthModel = {
       actions.setError(null);
       
       // Call login API
-      const response = await post<ApiResponse<{ user: User; token: string }>>(
+      const response = await post<ApiResponse<{ 
+        user: User; 
+        token: string;
+        refreshToken: string;
+      }>>(
         '/auth/login',
         credentials
       );
       
-      const { user, token } = response.data;
+      const { user, token, refreshToken } = response.data;
       
       // Update auth state
       actions.setUser(user);
       actions.setToken(token);
       actions.setIsAuthenticated(true);
+      
+      // Store refresh token in localStorage
+      localStorage.setItem('refreshToken', refreshToken);
       
       // Show success message
       toast.success('Login successful');
@@ -124,17 +130,24 @@ export const authModel: AuthModel = {
       actions.setError(null);
       
       // Call register API
-      const response = await post<ApiResponse<{ user: User; token: string }>>(
+      const response = await post<ApiResponse<{ 
+        user: User; 
+        token: string;
+        refreshToken: string;
+      }>>(
         '/auth/register',
         credentials
       );
       
-      const { user, token } = response.data;
+      const { user, token, refreshToken } = response.data;
       
       // Update auth state
       actions.setUser(user);
       actions.setToken(token);
       actions.setIsAuthenticated(true);
+      
+      // Store refresh token
+      localStorage.setItem('refreshToken', refreshToken);
       
       // Show success message
       toast.success('Registration successful');
@@ -151,11 +164,13 @@ export const authModel: AuthModel = {
   }),
   
   logout: thunk(async (actions) => {
-    // Clear token and user data
+    // Clear tokens and user data
     actions.setToken(null);
     actions.setUser(null);
     actions.setIsAuthenticated(false);
     actions.setError(null);
+    
+    localStorage.removeItem('refreshToken');
     
     // Show success message
     toast.success('Logged out successfully');
@@ -167,9 +182,23 @@ export const authModel: AuthModel = {
     const token = localStorage.getItem('token');
     
     if (token) {
-      // For this template, we'll just set isAuthenticated to true
-      // In a real app, you would verify the token with the server
-      actions.setIsAuthenticated(true);
+      try {
+        // Verify token with the server
+        const response = await post<ApiResponse<{ user: User }>>(
+          '/auth/verify-token'
+        );
+        
+        // If we get here, token is valid
+        actions.setUser(response.data.user);
+        actions.setIsAuthenticated(true);
+      } catch (error) {
+        // Token is invalid, clear it
+        actions.setToken(null);
+        actions.setUser(null);
+        actions.setIsAuthenticated(false);
+        localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
+      }
     }
     
     actions.setIsLoading(false);

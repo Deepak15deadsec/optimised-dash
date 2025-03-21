@@ -1,9 +1,9 @@
-
 import axios, { AxiosRequestConfig, AxiosError, AxiosResponse } from 'axios';
 import { toast } from 'sonner';
+import store from '@/store';
 
 // Get the base URL from environment variables
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_URL;
 
 // Create axios instance
 const axiosClient = axios.create({
@@ -13,9 +13,67 @@ const axiosClient = axios.create({
   },
 });
 
+// Track if we're currently refreshing the token
+let isRefreshing = false;
+// Store pending requests that should be retried after token refresh
+let failedQueue: { resolve: Function; reject: Function }[] = [];
+
+// Track token initialization state
+let isTokenInitialized = false;
+// Queue for requests made before token is initialized
+let tokenInitQueue: { config: any; resolve: Function; reject: Function }[] = [];
+
+// Function to process queued requests
+const processQueue = (error: any = null) => {
+  failedQueue.forEach(promise => {
+    if (error) {
+      promise.reject(error);
+    } else {
+      promise.resolve();
+    }
+  });
+  
+  failedQueue = [];
+};
+
+// Function to process token initialization queue
+const processTokenInitQueue = () => {
+  tokenInitQueue.forEach(request => {
+    axiosClient(request.config)
+      .then(response => request.resolve(response))
+      .catch(error => request.reject(error));
+  });
+  
+  tokenInitQueue = [];
+};
+
+// Function to set token initialization status
+export const setTokenInitialized = (status: boolean) => {
+  isTokenInitialized = status;
+  if (status) {
+    processTokenInitQueue();
+  }
+};
+
 // Add a request interceptor
 axiosClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
+    // If token is not initialized and this is a secured endpoint (not login/register)
+    const isAuthEndpoint = config.url?.includes('/auth/login') || 
+                           config.url?.includes('/auth/register') ||
+                           config.url?.includes('/auth/refresh-token');
+    
+    if (!isTokenInitialized && !isAuthEndpoint) {
+      // Return a promise that will be resolved when token is initialized
+      return new Promise((resolve, reject) => {
+        tokenInitQueue.push({ 
+          config, 
+          resolve: (response: any) => resolve(response),
+          reject: (error: any) => reject(error)
+        });
+      });
+    }
+    
     // Get token from local storage
     const token = localStorage.getItem('token');
     
@@ -36,8 +94,71 @@ axiosClient.interceptors.response.use(
   (response: AxiosResponse) => {
     return response;
   },
-  (error: AxiosError) => {
+  async (error: AxiosError) => {
+    const originalRequest = error.config as any;
     const { response } = error;
+    
+    // Handle token refresh for 401 errors (but not for the refresh token endpoint itself)
+    if (response?.status === 401 && !originalRequest._retry && 
+        originalRequest.url !== '/auth/refresh-token') {
+      
+      if (isRefreshing) {
+        // If already refreshing, queue this request
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then(() => axiosClient(originalRequest))
+          .catch(err => Promise.reject(err));
+      }
+      
+      originalRequest._retry = true;
+      isRefreshing = true;
+      
+      try {
+        // Get refresh token from localStorage
+        const refreshToken = localStorage.getItem('refreshToken');
+        
+        if (!refreshToken) {
+          throw new Error('No refresh token available');
+        }
+        
+        // Call refresh token API
+        const response = await axiosClient.post('/auth/refresh-token', {
+          refreshToken
+        });
+        
+        const { token, refreshToken: newRefreshToken } = response.data.data;
+        
+        // Update tokens in store
+        store.getActions().auth.setToken(token);
+        localStorage.setItem('refreshToken', newRefreshToken);
+        
+        // Update authorization header for original request
+        originalRequest.headers.Authorization = `Bearer ${token}`;
+        
+        // Process queued requests
+        processQueue();
+        
+        // Retry the original request
+        return axiosClient(originalRequest);
+      } catch (refreshError) {
+        // If refresh fails, process queue with error
+        processQueue(refreshError);
+        
+        // Force logout
+        store.getActions().auth.logout();
+        
+        // Redirect to login
+        if (window.location.pathname !== '/login') {
+          toast.error('Your session has expired. Please log in again.');
+          window.location.href = '/login';
+        }
+        
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
+    }
     
     if (response) {
       const status = response.status;
